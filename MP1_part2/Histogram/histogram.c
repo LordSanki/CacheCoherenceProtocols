@@ -386,7 +386,24 @@ long* histogram(char* fn_input) {
   histo = malloc(256*sizeof(long));
   image = Image_Read(fn_input);
 
-#if PAR 
+//#define SOL_ATOMIC
+//#define SOL_LOCK
+
+#ifdef SOL_ATOMIC
+
+#pragma omp parallel for shared (image, histo) private(m,i,j)
+  for (m=0; m<10; m++) {
+    for (i=0; i<image->row; i++) {
+      for (j=0; j<image->col; j++) {
+#pragma omp atomic
+        histo[image->content[i][j]]++;
+      }
+    }
+  }
+
+#else
+
+#ifdef SOL_LOCK 
   omp_lock_t writelock[256];
   for(i=0;i<256;i++)
     omp_init_lock(&writelock[i]);
@@ -412,12 +429,13 @@ long* histogram(char* fn_input) {
     }
   }
 #endif
+#endif
 
  /* ------- Termination */
   Image_Destroy(&image);
   printf("--- Histogram Content ---\n");
   for (i=0; i<256; i++)
-    printf("histo[%d] = %d\n", i, histo[i]);
+    printf("histo[%d] = %ld\n", i, histo[i]);
   return histo;
 }
 
