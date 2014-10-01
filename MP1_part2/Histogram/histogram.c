@@ -59,6 +59,7 @@
 #include <string.h>
 #include <assert.h>
 #include <time.h>
+#include <omp.h>
 
 typedef enum {eBlackAndWhite,
               eGrayScale8,
@@ -385,7 +386,24 @@ long* histogram(char* fn_input) {
   histo = malloc(256*sizeof(long));
   image = Image_Read(fn_input);
 
+#if PAR 
+  omp_lock_t writelock[256];
+  for(i=0;i<256;i++)
+    omp_init_lock(&writelock[i]);
   /* obtain histogram from image, repeated 10 times */
+
+#pragma omp parallel for shared (image, writelock, histo) private(m,i,j)
+  for (m=0; m<10; m++) {
+    for (i=0; i<image->row; i++) {
+      for (j=0; j<image->col; j++) {
+        omp_set_lock(&writelock[image->content[i][j]]);
+        histo[image->content[i][j]]++;
+        omp_unset_lock(&writelock[image->content[i][j]]);
+      }
+    }
+  }
+
+#else
   for (m=0; m<10; m++) {
     for (i=0; i<image->row; i++) {
       for (j=0; j<image->col; j++) {
@@ -393,6 +411,8 @@ long* histogram(char* fn_input) {
       }
     }
   }
+#endif
+
  /* ------- Termination */
   Image_Destroy(&image);
   printf("--- Histogram Content ---\n");
