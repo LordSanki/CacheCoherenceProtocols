@@ -216,7 +216,7 @@ void IntList_Delete(pIntList pList, int x)
 void IntList_Print(pIntList list) 
 {
   pIntListNode p = list->head;
-  int i;
+  int i=0;
 
 #if 0
   if (p != NULL) {
