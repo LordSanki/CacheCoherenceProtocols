@@ -11,14 +11,15 @@
 #include <CustomTypes.h>
 using namespace std;
 using namespace Snooper;
+#define CALL_FUNC(FUNC_PTR) (this->*(FUNC_PTR))
 Cache::Cache(int s,int a,int b, SharedBus &shared_bus )
   :bus(shared_bus)
 {
   ulong i, j;
   reads = readMisses = writes = 0; 
   writeMisses = writeBacks = currentCycle = 0;
-  flushes = interventions = invalidations = 0;
-  numBusRdX = 0;
+  flushOpts = flushes = interventions = invalidations = 0;
+  busUpgrades = 0;
   size       = (ulong)(s);
   lineSize   = (ulong)(b);
   assoc      = (ulong)(a);   
@@ -48,7 +49,8 @@ Cache::Cache(int s,int a,int b, SharedBus &shared_bus )
       cache[i][j].invalidate();
     }
   }      
-  bus.regSnoopEvent(snooperCallback,this);
+  bus.regSnoopEvent(snooperCallback,copyExistCallback,this);
+  setCoherenceProtocol(0);
 }
 
 /**you might add other parameters to Access()
@@ -73,7 +75,7 @@ void Cache::Access(ulong addr,uchar op)
     }
     else
       readMisses++;
-    missMSI(newline, addr, op);
+    CALL_FUNC(miss)(newline, addr, op);
 	}
 	else
 	{
@@ -83,7 +85,7 @@ void Cache::Access(ulong addr,uchar op)
     {
       line->setFlags(DIRTY);
     }
-    hitMSI(line, addr, op);
+    CALL_FUNC(hit)(line, addr, op);
 	}
 }
 
@@ -174,8 +176,8 @@ void Cache::printStats()
   printf("04. number of write misses:     %lu\n",writeMisses);
   printf("05. total miss rate:        %1.2f%c\n",miss_rate,'%');
   printf("06. number of writebacks:       %lu\n",writeBacks);
-  printf("07. number of cache-to-cache transfers:   %lu\n",0lu);
-  printf("08. number of memory transactions:    %lu\n",readMisses+numBusRdX+writeBacks);
+  printf("07. number of cache-to-cache transfers:   %lu\n",flushOpts);
+  printf("08. number of memory transactions:    %lu\n",readMisses+writeMisses+writeBacks+busUpgrades-flushOpts);
   printf("09. number of interventions:      %lu\n",interventions);
   printf("10. number of invalidations:      %lu\n",invalidations);
   printf("11. number of flushes:        %lu\n",flushes);
@@ -184,17 +186,48 @@ void Cache::printStats()
   /****follow the ouput file format**************/
 }
 
-void Cache::updateOnSnoop(SnooperEvent e)
+void Cache::setCoherenceProtocol(int choice)
 {
-  if(((Cache*)e.sender) == this) return;
-  cacheLine *line = findLine(e.addr);
-  if(line == NULL) return;
-  updateMSI(line, e);
+  switch(choice)
+  {
+    case 0:
+      hit = &Cache::hitMSI;
+      miss = &Cache::missMSI;
+      update = &Cache::updateMSI;
+      break;
+    case 1:
+      hit = &Cache::hitMESI;
+      miss = &Cache::missMESI;
+      update = &Cache::updateMESI;
+      break;
+    case 2:
+      break;
+    default:
+      hit = &Cache::hitMSI;
+      miss = &Cache::missMSI;
+      update = &Cache::updateMSI;
+      break;
+  }
 }
 
 void Cache::snooperCallback(SnooperEvent e, SnoopArgument arg)
 {
   ((Cache*)arg)->updateOnSnoop(e);
+}
+
+bool Cache::copyExistCallback(SnooperEvent e, SnoopArgument arg)
+{
+  if( ((Cache*)arg) == ((Cache*)e.sender) ) return false;
+  if( NULL == ((Cache*)arg)->findLine(e.addr) ) return false;
+  return true;
+}
+
+void Cache::updateOnSnoop(SnooperEvent e)
+{
+  if(((Cache*)e.sender) == this) return;
+  cacheLine *line = findLine(e.addr);
+  if(line == NULL) return;
+  CALL_FUNC(update)(line, e);
 }
 
 void Cache::updateMSI(cacheLine *line, SnooperEvent e)
@@ -204,8 +237,7 @@ void Cache::updateMSI(cacheLine *line, SnooperEvent e)
   {
     if( e_BusRdX == e.busEvent )
     {
-      line->invalidate();
-      invalidations++;
+      invalidate(line);
     }
   }
   if(line->getShareState() == e_M)
@@ -215,14 +247,16 @@ void Cache::updateMSI(cacheLine *line, SnooperEvent e)
     if( e_BusRdX == e.busEvent )
       // transition to invalid
     {
-      line->invalidate();
+      writeBack(e.addr);
+      invalidate(line);
       bus.postEvent(SnooperEvent(e.addr, e_Flush, this));
       flushes++;
-      invalidations++;
     }
     if( e_BusRd == e.busEvent )
       // transition to shared
     {
+      writeBack(e.addr);
+      line->setFlags(VALID);
       line->setShareState(e_S);
       bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
       flushes++;
@@ -236,7 +270,6 @@ void Cache::missMSI(cacheLine *line, ulong addr, uchar op)
   if(op == 'w')
   {
     bus.postEvent(SnooperEvent(addr, e_BusRdX,this));
-    numBusRdX++;
     line->setShareState(e_M);
   }
   else
@@ -254,11 +287,70 @@ void Cache::hitMSI(cacheLine *line, ulong addr, uchar op)
     if(line->getShareState() == e_S)
     {
       bus.postEvent(SnooperEvent(addr,e_BusRdX,this));
-      numBusRdX++;
+      busUpgrades++;
       line->setShareState(e_M);
     }
   }
   else
   {
+  }
+}
+
+void Cache::updateMESI(cacheLine *line, SnooperEvent e)
+{
+  if(line->getShareState() == e_S)
+  // Shared state
+  {
+    if( e_BusRdX == e.busEvent || e_BusUpgr == e.busEvent)
+    {
+      invalidate(line);
+    }
+    if( e_BusRdX == e.busEvent || e_BusRd == e.busEvent)
+    {
+      //flushOpts++;
+    }
+  }
+  if(line->getShareState() == e_E)
+  {
+    if( e_BusRdX == e.busEvent )
+    {
+      //flushOpts++;
+      invalidate(line);
+    }
+    if( e_BusRd == e.busEvent )
+    {
+      //flushOpts++;
+      interventions++;
+      line->setShareState(e_S);
+    }
+  }
+  updateMSI(line, e);
+}
+
+void Cache::missMESI(cacheLine *line, ulong addr, uchar op)
+{
+  bool copy_exists = bus.copyExist(SnooperEvent(addr,e_BusRd,this));
+  missMSI(line, addr, op);
+  if(copy_exists)
+      flushOpts++;
+  else if(op == 'r')
+      line->setShareState(e_E);
+}
+
+void Cache::hitMESI(cacheLine *line, ulong addr, uchar op)
+{
+  if(op == 'w')
+  {
+    if(line->getShareState() == e_S)
+    {
+      bus.postEvent(SnooperEvent(addr,e_BusUpgr,this));
+      //busUpgrades++;
+      line->setShareState(e_M);
+    }
+
+    if(line->getShareState() == e_E)
+    {
+      line->setShareState(e_M);
+    }
   }
 }

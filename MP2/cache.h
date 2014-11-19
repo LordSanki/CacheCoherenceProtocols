@@ -36,16 +36,18 @@ namespace Snooper
     {sender = sender_; addr = addr_; busEvent = e_;}
   };
   typedef void(*SnoopEventFunc)(SnooperEvent, SnoopArgument);
-  struct SnooperEntry { SnoopEventFunc func; SnoopArgument arg;};
+  typedef bool(*CopyEventFunc)(SnooperEvent, SnoopArgument);
 };
 
 class SharedBus
 {
+  struct SnooperEntry { Snooper::SnoopEventFunc seFunc; Snooper::CopyEventFunc ceFunc; Snooper::SnoopArgument arg;};
   public:
-    void regSnoopEvent(Snooper::SnoopEventFunc func, Snooper::SnoopArgument arg)
+    void regSnoopEvent(Snooper::SnoopEventFunc func1, Snooper::CopyEventFunc func2, Snooper::SnoopArgument arg)
     {
       //DO((int*)func);DE((int*)arg);
-      Snooper::SnooperEntry s; s.func = func; s.arg = arg;
+      SnooperEntry s; 
+      s.seFunc = func1; s.ceFunc = func2; s.arg = arg;
       _snoopers.push_back(s);
     }
     void postEvent(Snooper::SnooperEvent e)
@@ -53,12 +55,19 @@ class SharedBus
       //DE((int*)e.sender);
       for(uint i=0; i<_snoopers.size(); i++)
       {
-        _snoopers[i].func(e, _snoopers[i].arg);
+        _snoopers[i].seFunc(e, _snoopers[i].arg);
       }
     }
-    
+    bool copyExist(Snooper::SnooperEvent e)
+    {
+      for(uint i=0; i<_snoopers.size(); i++)
+      {
+        if( _snoopers[i].ceFunc(e, _snoopers[i].arg) ) return true;
+      }
+      return false;
+    }
   private:
-    std::vector<Snooper::SnooperEntry> _snoopers;
+    std::vector<SnooperEntry> _snoopers;
 };
 
 /****add new states, based on the protocol****/
@@ -99,15 +108,22 @@ public:
 
 class Cache
 {
+  typedef void(Cache::*CacheEventFuncPtr)(cacheLine*,ulong,uchar);
+  typedef void(Cache::*BusEventFuncPtr)(cacheLine*, Snooper::SnooperEvent);
 protected:
    ulong size, lineSize, assoc, sets, log2Sets, log2Blk, tagMask, numLines;
    ulong reads,readMisses,writes,writeMisses,writeBacks;
-   ulong invalidations,interventions;
-   ulong flushes;
-   ulong numBusRdX;
-   SharedBus &bus;
    //******///
    //add coherence counters here///
+   ulong invalidations,interventions;
+   ulong flushes, flushOpts;
+   ulong busUpgrades;
+
+   SharedBus &bus;
+
+   CacheEventFuncPtr hit;
+   CacheEventFuncPtr miss;
+   BusEventFuncPtr update;
    //******///
 
    cacheLine **cache;
@@ -134,16 +150,22 @@ public:
    void Access(ulong,uchar);
    void printStats();
    void updateLRU(cacheLine *);
-   void updateOnSnoop(Snooper::SnooperEvent e);
-   static void snooperCallback(Snooper::SnooperEvent e, Snooper::SnoopArgument arg);
    //******///
    //add other functions to handle bus transactions///
-   //******///
+   void setCoherenceProtocol(int);
+   static void snooperCallback(Snooper::SnooperEvent e, Snooper::SnoopArgument arg);
+   static bool copyExistCallback(Snooper::SnooperEvent e, Snooper::SnoopArgument arg);
 
 private:
+   void updateOnSnoop(Snooper::SnooperEvent e);
+   void invalidate(cacheLine *line) { line->invalidate(); invalidations++; }
    void updateMSI(cacheLine *line, Snooper::SnooperEvent e);
    void hitMSI(cacheLine *line, ulong addr, uchar op);
    void missMSI(cacheLine *line, ulong addr, uchar op);
+   void updateMESI(cacheLine *line, Snooper::SnooperEvent e);
+   void hitMESI(cacheLine *line, ulong addr, uchar op);
+   void missMESI(cacheLine *line, ulong addr, uchar op);
+   //******///
 
 };
 

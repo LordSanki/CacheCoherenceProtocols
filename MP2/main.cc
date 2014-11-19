@@ -31,8 +31,6 @@ int main(int argc, char *argv[])
 	int blk_size   = atoi(argv[3]);
 	int num_processors = atoi(argv[4]);/*1, 2, 4, 8*/
 	int protocol   = atoi(argv[5]);	 /*0:MSI, 1:MESI, 2:Dragon*/
-	char *fname =  (char *)malloc(20);
- 	fname = argv[6];
 
 	
 	//****************************************************//
@@ -46,7 +44,10 @@ int main(int argc, char *argv[])
   SharedBus bus;
   Cache **cacheArray = new Cache* [num_processors];
   for(int i=0;i<num_processors;i++)
+  {
     cacheArray[i] = new Cache(cache_size, cache_assoc, blk_size, bus);
+    cacheArray[i]->setCoherenceProtocol(protocol);
+  }
 	//*********************************************//	
 
 	//pFile = fopen (fname,"r");
@@ -57,7 +58,7 @@ int main(int argc, char *argv[])
 	//}
 	///******************************************************************//
 	//**read trace file,line by line,each(processor#,operation,address)**//
-  for(TraceReader tr(fname); tr; tr++)
+  for(TraceReader tr(argv[6]); tr; tr++)
   {
     cacheArray[tr.proc()]->Access(tr.addr(), tr.op());
   }
@@ -80,7 +81,7 @@ int main(int argc, char *argv[])
   printf("L1_BLOCKSIZE:   %d\n",blk_size);
   printf("NUMBER OF PROCESSORS: %d\n",num_processors);
   printf("COHERENCE PROTOCOL: %s\n", protocol_name[protocol]);
-  printf("TRACE FILE:   %s\n","traces/canneal.04t.debug");
+  printf("TRACE FILE:   %s\n",argv[6]);
   for(int i=0; i<num_processors; i++)
   {
     printf("============ Simulation results (Cache %d) ============\n",i);
