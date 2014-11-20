@@ -165,6 +165,10 @@ private:
    void updateMESI(cacheLine *line, Snooper::SnooperEvent e);
    void hitMESI(cacheLine *line, ulong addr, uchar op);
    void missMESI(cacheLine *line, ulong addr, uchar op);
+   void updateDragon(cacheLine *line, Snooper::SnooperEvent e);
+   void hitDragon(cacheLine *line, ulong addr, uchar op);
+   void missDragon(cacheLine *line, ulong addr, uchar op);
+
    //******///
 
 };

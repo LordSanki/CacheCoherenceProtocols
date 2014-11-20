@@ -201,6 +201,9 @@ void Cache::setCoherenceProtocol(int choice)
       update = &Cache::updateMESI;
       break;
     case 2:
+      hit = &Cache::hitDragon;
+      miss = &Cache::missDragon;
+      update = &Cache::updateDragon;
       break;
     default:
       hit = &Cache::hitMSI;
@@ -277,7 +280,6 @@ void Cache::missMSI(cacheLine *line, ulong addr, uchar op)
     bus.postEvent(SnooperEvent(addr, e_BusRd,this));
     line->setShareState(e_S);
   }
-
 }
 
 void Cache::hitMSI(cacheLine *line, ulong addr, uchar op)
@@ -327,16 +329,6 @@ void Cache::updateMESI(cacheLine *line, SnooperEvent e)
   updateMSI(line, e);
 }
 
-void Cache::missMESI(cacheLine *line, ulong addr, uchar op)
-{
-  bool copy_exists = bus.copyExist(SnooperEvent(addr,e_BusRd,this));
-  missMSI(line, addr, op);
-  if(copy_exists)
-      flushOpts++;
-  else if(op == 'r')
-      line->setShareState(e_E);
-}
-
 void Cache::hitMESI(cacheLine *line, ulong addr, uchar op)
 {
   if(op == 'w')
@@ -354,3 +346,113 @@ void Cache::hitMESI(cacheLine *line, ulong addr, uchar op)
     }
   }
 }
+
+void Cache::missMESI(cacheLine *line, ulong addr, uchar op)
+{
+  bool copy_exists = bus.copyExist(SnooperEvent(addr,e_BusRd,this));
+  missMSI(line, addr, op);
+  if(copy_exists)
+      flushOpts++;
+  else if(op == 'r')
+      line->setShareState(e_E);
+}
+
+void Cache::updateDragon(cacheLine *line, Snooper::SnooperEvent e)
+{
+  if(line->getShareState() == e_E)
+  // Shared state
+  {
+    if(e_BusRd == e.busEvent)
+    {
+      interventions++;
+      line->setShareState(e_Sc);
+      //flushOpts++;
+    }
+  }
+  if(line->getShareState() == e_Sm)
+  {
+    if( e_BusUpdt == e.busEvent )
+    {
+      line->setShareState(e_Sc);
+      line->setFlags(VALID);
+    }
+    if( e_BusRd == e.busEvent )
+    {
+      bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
+      flushes++;
+    }
+  }
+  if(line->getShareState() == e_M)
+  {
+    if( e_BusRd == e.busEvent )
+    {
+      bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
+      line->setShareState(e_Sm);
+      interventions++;
+      flushes++;
+    }
+  }
+}
+
+void Cache::hitDragon(cacheLine *line, ulong addr, uchar op)
+{
+  if(op == 'w')
+  {
+    if(line->getShareState() == e_Sc)
+    {
+      bus.postEvent(SnooperEvent(addr, e_BusUpdt,this));
+      if( bus.copyExist(SnooperEvent(addr,e_BusRd,this)) )
+      {
+        line->setShareState(e_Sm);
+      }
+      else
+      {
+        line->setShareState(e_M);
+      }
+    }
+    if(line->getShareState() == e_E)
+    {
+      line->setShareState(e_M);
+    }
+    if(line->getShareState() == e_Sm)
+    {
+      bus.postEvent(SnooperEvent(addr, e_BusUpdt,this));
+      if(! bus.copyExist(SnooperEvent(addr,e_BusRd,this)) )
+        line->setShareState(e_M);
+    }
+  }
+}
+
+void Cache::missDragon(cacheLine *line, ulong addr, uchar op)
+{
+  bool copy_exists = bus.copyExist(SnooperEvent(addr,e_BusRd,this));
+  bus.postEvent(SnooperEvent(addr, e_BusRd,this));
+
+  if(op == 'w')
+  {
+    if(copy_exists)
+    {
+      line->setShareState(e_Sm);
+      bus.postEvent(SnooperEvent(addr, e_BusUpdt,this));
+      //flushOpts++;
+    }
+    else
+    {
+      line->setShareState(e_M);
+    }
+  }
+  else
+  {
+    if(copy_exists)
+    {
+      line->setShareState(e_Sc);
+      //flushOpts++;
+    }
+    else
+    {
+      line->setShareState(e_E);
+    }
+  }
+}
+
+
