@@ -379,6 +379,7 @@ void Cache::updateDragon(cacheLine *line, Snooper::SnooperEvent e)
     if( e_BusRd == e.busEvent )
     {
       bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
+      writeBacks++;
       flushes++;
     }
   }
@@ -389,6 +390,7 @@ void Cache::updateDragon(cacheLine *line, Snooper::SnooperEvent e)
       bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
       line->setShareState(e_Sm);
       interventions++;
+      writeBacks++;
       flushes++;
     }
   }
