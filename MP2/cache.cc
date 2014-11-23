@@ -48,8 +48,10 @@ Cache::Cache(int s,int a,int b, SharedBus &shared_bus )
     {
       cache[i][j].invalidate();
     }
-  }      
+  }
+  // registering functions to be called on snoop event and copy exist line  
   bus.regSnoopEvent(snooperCallback,copyExistCallback,this);
+  // setting default coherence protocol to MSI
   setCoherenceProtocol(0);
 }
 
@@ -75,6 +77,8 @@ void Cache::Access(ulong addr,uchar op)
     }
     else
       readMisses++;
+    // Calling the member function pointed by miss
+    // this function pointer is initialized when protocol is selected
     CALL_FUNC(miss)(newline, addr, op);
 	}
 	else
@@ -85,6 +89,8 @@ void Cache::Access(ulong addr,uchar op)
     {
       line->setFlags(DIRTY);
     }
+    // Calling the member function pointed by miss
+    // this function pointer is initialized when protocol is selected
     CALL_FUNC(hit)(line, addr, op);
 	}
 }
@@ -188,6 +194,8 @@ void Cache::printStats()
 
 void Cache::setCoherenceProtocol(int choice)
 {
+  // initializing function pointers miss hit and update 
+  // with functions of appropriate protocol
   switch(choice)
   {
     case 0:
@@ -213,11 +221,13 @@ void Cache::setCoherenceProtocol(int choice)
   }
 }
 
+// call back static function for snoop event
 void Cache::snooperCallback(SnooperEvent e, SnoopArgument arg)
 {
   ((Cache*)arg)->updateOnSnoop(e);
 }
 
+// call back function to check if copy exists
 bool Cache::copyExistCallback(SnooperEvent e, SnoopArgument arg)
 {
   if( ((Cache*)arg) == ((Cache*)e.sender) ) return false;
@@ -225,14 +235,18 @@ bool Cache::copyExistCallback(SnooperEvent e, SnoopArgument arg)
   return true;
 }
 
+// membed function which is called by call back snooper function
 void Cache::updateOnSnoop(SnooperEvent e)
 {
   if(((Cache*)e.sender) == this) return;
   cacheLine *line = findLine(e.addr);
   if(line == NULL) return;
+  // Calling the member function pointed by update
+  // this function pointer is initialized when protocol is selected
   CALL_FUNC(update)(line, e);
 }
 
+// function called when there is cache miss in MSI
 void Cache::updateMSI(cacheLine *line, SnooperEvent e)
 {
   if(line->getShareState() == e_S)
@@ -252,6 +266,7 @@ void Cache::updateMSI(cacheLine *line, SnooperEvent e)
     {
       writeBack(e.addr);
       invalidate(line);
+      // posting a flush event on bus
       bus.postEvent(SnooperEvent(e.addr, e_Flush, this));
       flushes++;
     }
@@ -261,6 +276,7 @@ void Cache::updateMSI(cacheLine *line, SnooperEvent e)
       writeBack(e.addr);
       line->setFlags(VALID);
       line->setShareState(e_S);
+      // posting a flush event on bus
       bus.postEvent(SnooperEvent(e.addr, e_Flush,this));
       flushes++;
       interventions++;
@@ -336,7 +352,6 @@ void Cache::hitMESI(cacheLine *line, ulong addr, uchar op)
     if(line->getShareState() == e_S)
     {
       bus.postEvent(SnooperEvent(addr,e_BusUpgr,this));
-      //busUpgrades++;
       line->setShareState(e_M);
     }
 
