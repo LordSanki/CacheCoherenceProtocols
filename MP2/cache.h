@@ -20,6 +20,7 @@ typedef unsigned short ushort;
 
 namespace Snooper
 {
+  // possible bus events
   enum BusEvent
   {
     e_BusRd,
@@ -39,10 +40,12 @@ namespace Snooper
   typedef bool(*CopyEventFunc)(SnooperEvent, SnoopArgument);
 };
 
+// class to propagate signals between caches
 class SharedBus
 {
   struct SnooperEntry { Snooper::SnoopEventFunc seFunc; Snooper::CopyEventFunc ceFunc; Snooper::SnoopArgument arg;};
   public:
+  // function to register snooper functions with bus
     void regSnoopEvent(Snooper::SnoopEventFunc func1, Snooper::CopyEventFunc func2, Snooper::SnoopArgument arg)
     {
       //DO((int*)func);DE((int*)arg);
@@ -50,6 +53,7 @@ class SharedBus
       s.seFunc = func1; s.ceFunc = func2; s.arg = arg;
       _snoopers.push_back(s);
     }
+    // function to post event to bus
     void postEvent(Snooper::SnooperEvent e)
     {
       //DE((int*)e.sender);
@@ -58,6 +62,7 @@ class SharedBus
         _snoopers[i].seFunc(e, _snoopers[i].arg);
       }
     }
+    // function to check if copy exists in other caches
     bool copyExist(Snooper::SnooperEvent e)
     {
       for(uint i=0; i<_snoopers.size(); i++)
@@ -76,13 +81,14 @@ enum CacheState{
 	VALID,
 	DIRTY
 };
+// Share states of a cache line
 enum ShareState{
-  e_I = 0,
-  e_S = 1,
-  e_M = 2,
-  e_E = 3,
-  e_Sc = 4,
-  e_Sm = 5
+  e_I = 0, // Invalid state
+  e_S = 1, // SHared state
+  e_M = 2, // modified state
+  e_E = 3, // exclusive state
+  e_Sc = 4, // Shared Clean (Dragon)
+  e_Sm = 5 // Shared modified (Dragon)
 };
 class cacheLine 
 {
@@ -90,7 +96,7 @@ protected:
    ulong tag;
    CacheState Flags;   // 0:invalid, 1:valid, 2:dirty 
    ulong seq;
-   ShareState shareState;
+   ShareState shareState; // share states refer enum for details
  
 public:
    cacheLine()            { tag = 0; Flags = INVALID; shareState = e_I;}
@@ -117,6 +123,7 @@ protected:
    //add coherence counters here///
    ulong invalidations,interventions;
    ulong flushes, flushOpts;
+   // will count busRdx issued when we already have data in MSI
    ulong busUpgrades;
 
    SharedBus &bus;
@@ -158,13 +165,18 @@ public:
 
 private:
    void updateOnSnoop(Snooper::SnooperEvent e);
+   // function to invalidate a line
    void invalidate(cacheLine *line) { line->invalidate(); invalidations++; }
+
+   // functions for MSI protocol
    void updateMSI(cacheLine *line, Snooper::SnooperEvent e);
    void hitMSI(cacheLine *line, ulong addr, uchar op);
    void missMSI(cacheLine *line, ulong addr, uchar op);
+   // functions for MESI protocol
    void updateMESI(cacheLine *line, Snooper::SnooperEvent e);
    void hitMESI(cacheLine *line, ulong addr, uchar op);
    void missMESI(cacheLine *line, ulong addr, uchar op);
+   // functions for Dragon protocol
    void updateDragon(cacheLine *line, Snooper::SnooperEvent e);
    void hitDragon(cacheLine *line, ulong addr, uchar op);
    void missDragon(cacheLine *line, ulong addr, uchar op);
